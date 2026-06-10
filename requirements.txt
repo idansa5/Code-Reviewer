@@ -2,7 +2,7 @@ fastapi
 uvicorn[standard]
 sqlalchemy[asyncio]>=2.0,<3.0
 aiosqlite
-httpx
+ollama
 pydantic-settings
 python-multipart
 pyyaml
