@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -13,7 +21,12 @@ from app.db.models import ScanStatus
 from app.db.session import get_session
 from app.llm.client import LLMClient, OllamaClient
 from app.reviewer.scanner import run_scan
-from app.schemas import HealthResponse, RuleResultOut, ScanResultResponse, ScanSubmitResponse
+from app.schemas import (
+    HealthResponse,
+    RuleResultOut,
+    ScanResultResponse,
+    ScanSubmitResponse,
+)
 
 router = APIRouter()
 
@@ -38,6 +51,7 @@ def get_cache_lock() -> asyncio.Lock:
     return cache_lock
 
 
+# Submit a new scan request.
 @router.post("/scans", response_model=ScanSubmitResponse)
 async def submit_scan(
     response: Response,
@@ -48,24 +62,34 @@ async def submit_scan(
     lock: asyncio.Lock = Depends(get_cache_lock),
 ) -> ScanSubmitResponse:
     if not file.filename or not file.filename.lower().endswith(".py"):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Only .py files are accepted")
-
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Only .py files are accepted"
+        )
+    # check if file is empty, in valid encoding and if excceds maximum size
     raw = await file.read()
     if not raw:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Uploaded file is empty")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Uploaded file is empty"
+        )
     if len(raw) > settings.max_file_size_bytes:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "File exceeds maximum size")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "File exceeds maximum size"
+        )
 
     try:
         code = raw.decode("utf-8")
     except UnicodeDecodeError:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "File must be valid UTF-8 text")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "File must be valid UTF-8 text"
+        )
 
     if not code.strip():
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Uploaded file is empty")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Uploaded file is empty"
+        )
 
     content_hash = compute_content_hash(code)
-
+    #  atomically check cache, update stale scans and, if no cached entry, create a new scan and queue it.
     async with lock:
         await repo.fail_stale_scans(session)
         existing = await repo.find_reusable_scan(session, content_hash)
@@ -75,9 +99,11 @@ async def submit_scan(
                 if existing.status == ScanStatus.COMPLETED.value
                 else status.HTTP_202_ACCEPTED
             )
-            return ScanSubmitResponse(scan_id=existing.id, status=existing.status, cached=True)
+            return ScanSubmitResponse(
+                scan_id=existing.id, status=existing.status, cached=True
+            )
 
-        if not limiter.try_acquire():
+        if not limiter.try_acquire():  # more then 5 parralel scans
             raise HTTPException(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 f"Scan capacity reached ({settings.max_parallel_scans} concurrent scans). "
@@ -87,10 +113,12 @@ async def submit_scan(
         try:
             scan = await repo.create_scan(session, content_hash, file.filename, code)
         except Exception:
-            limiter.release()
+            limiter.release()  # in case the creation of the scan failed, release the slot
             raise
-
-    task = asyncio.create_task(run_scan(scan.id, code, llm_client=client, release_slot=limiter.release))
+    # add task refrence for background tasks in order to prevent early garbage collection
+    task = asyncio.create_task(
+        run_scan(scan.id, code, llm_client=client, release_slot=limiter.release)
+    )
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
@@ -98,8 +126,11 @@ async def submit_scan(
     return ScanSubmitResponse(scan_id=scan.id, status=scan.status, cached=False)
 
 
+# get scan result by id
 @router.get("/scans/{scan_id}", response_model=ScanResultResponse)
-async def get_scan_result(scan_id: str, session: AsyncSession = Depends(get_session)) -> ScanResultResponse:
+async def get_scan_result(
+    scan_id: str, session: AsyncSession = Depends(get_session)
+) -> ScanResultResponse:
     scan = await repo.get_scan(session, scan_id)
     if scan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Scan not found")

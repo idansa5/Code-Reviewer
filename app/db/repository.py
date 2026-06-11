@@ -9,7 +9,12 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.db.models import RuleResult, Scan, ScanStatus, utcnow
 
-REUSABLE_STATUSES = (ScanStatus.PENDING.value, ScanStatus.RUNNING.value, ScanStatus.COMPLETED.value)
+
+REUSABLE_STATUSES = (
+    ScanStatus.PENDING.value,
+    ScanStatus.RUNNING.value,
+    ScanStatus.COMPLETED.value,
+)
 
 
 def _cutoff(ttl_hours: int | None) -> dt.datetime:
@@ -38,8 +43,15 @@ async def find_reusable_scan(
     return result.scalar_one_or_none()
 
 
-async def create_scan(session: AsyncSession, content_hash: str, filename: str, code: str) -> Scan:
-    scan = Scan(content_hash=content_hash, filename=filename, code=code, status=ScanStatus.PENDING.value)
+async def create_scan(
+    session: AsyncSession, content_hash: str, filename: str, code: str
+) -> Scan:
+    scan = Scan(
+        content_hash=content_hash,
+        filename=filename,
+        code=code,
+        status=ScanStatus.PENDING.value,
+    )
     session.add(scan)
     await session.commit()
     await session.refresh(scan)
@@ -61,7 +73,13 @@ async def save_rule_result(
     detail: str | None,
 ) -> None:
     session.add(
-        RuleResult(scan_id=scan_id, rule_id=rule_id, rule_name=rule_name, adheres=adheres, detail=detail)
+        RuleResult(
+            scan_id=scan_id,
+            rule_id=rule_id,
+            rule_name=rule_name,
+            adheres=adheres,
+            detail=detail,
+        )
     )
     await session.commit()
 
@@ -81,15 +99,23 @@ async def mark_failed(session: AsyncSession, scan_id: str, error: str) -> None:
     await session.commit()
 
 
-async def get_scan(session: AsyncSession, scan_id: str, ttl_hours: int | None = None) -> Scan | None:
+async def get_scan(
+    session: AsyncSession, scan_id: str, ttl_hours: int | None = None
+) -> Scan | None:
     stmt = (
         select(Scan)
         .where(Scan.id == scan_id, Scan.created_at >= _cutoff(ttl_hours))
         .options(selectinload(Scan.results))
     )
     result = await session.execute(stmt)
-    scan = result.scalar_one_or_none()
-    if scan is not None and scan.status == ScanStatus.RUNNING.value and scan.created_at < _stale_cutoff():
+    scan = result.scalar_one_or_none()  # for stict max one row
+    # Lazy fixup: check if the worker died mid-scan. Otherwise the row would stay
+
+    if (
+        scan is not None
+        and scan.status == ScanStatus.RUNNING.value
+        and scan.created_at < _stale_cutoff()
+    ):
         scan.status = ScanStatus.FAILED.value
         scan.completed_at = utcnow()
         scan.error = "Scan timed out"
@@ -97,18 +123,27 @@ async def get_scan(session: AsyncSession, scan_id: str, ttl_hours: int | None = 
     return scan
 
 
+# turn to failed  scans that got "hanged"
 async def fail_stale_scans(session: AsyncSession) -> int:
     stmt = (
         update(Scan)
-        .where(Scan.status == ScanStatus.RUNNING.value, Scan.created_at < _stale_cutoff())
-        .values(status=ScanStatus.FAILED.value, completed_at=utcnow(), error="Scan timed out")
+        .where(
+            Scan.status == ScanStatus.RUNNING.value, Scan.created_at < _stale_cutoff()
+        )
+        .values(
+            status=ScanStatus.FAILED.value,
+            completed_at=utcnow(),
+            error="Scan timed out",
+        )
     )
     result = await session.execute(stmt)
     await session.commit()
     return result.rowcount or 0
 
 
-async def delete_expired_scans(session: AsyncSession, ttl_hours: int | None = None) -> int:
+async def delete_expired_scans(
+    session: AsyncSession, ttl_hours: int | None = None
+) -> int:
     stmt = delete(Scan).where(Scan.created_at < _cutoff(ttl_hours))
     result = await session.execute(stmt)
     await session.commit()

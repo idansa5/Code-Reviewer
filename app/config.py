@@ -4,15 +4,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5-coder:7b"
     llm_timeout_seconds: int = 120
     max_parallel_scans: int = 5
     result_ttl_hours: int = 24
-    cleanup_interval_seconds: int = 600
-    scan_stale_seconds: int = 300
+    cleanup_interval_seconds: int = 600  # for the 24 TTL clean up loop (10 min)
+    scan_stale_seconds: int = 300  # to avoid hanging scans
     database_url: str = "sqlite+aiosqlite:///./code_review.db"
     rules_version: str = "v1"
     max_file_size_bytes: int = 1_000_000

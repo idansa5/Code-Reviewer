@@ -33,7 +33,7 @@ async def run_scan(
     """
     try:
         await _run(repo.mark_running, scan_id)
-
+        # run each rule and check the code according to it
         for rule in RULES:
             prompt = rule.build_prompt(code)
             try:
@@ -46,9 +46,13 @@ async def run_scan(
                     f"LLM call for rule '{rule.id}' exceeded {settings.llm_timeout_seconds}s"
                 ) from None
             adheres = parse_verdict(raw)
-            await _run(repo.save_rule_result, scan_id, rule.id, rule.name, adheres, None)
+            await _run(
+                repo.save_rule_result, scan_id, rule.id, rule.name, adheres, None
+            )
 
-        await _run(repo.mark_completed, scan_id)
+        await _run(
+            repo.mark_completed, scan_id
+        )  # mark the scan as completed after going all of the rules
     except Exception as exc:
         logger.exception("Scan %s failed", scan_id)
         try:

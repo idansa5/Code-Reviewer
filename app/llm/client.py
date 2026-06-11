@@ -32,12 +32,13 @@ class OllamaClient:
         )
 
     async def complete(self, prompt: str, *, json_schema: dict | None = None) -> str:
+        """sends the llm a prompt and recive a completion"""
         response = await self._client.generate(
             model=self._model,
             prompt=prompt,
             format=json_schema,
             stream=False,
-            options={"temperature": 0},  # keeps deterministic
+            options={"temperature": 0},  # keeps output deterministic
         )
         return response.response
 

@@ -11,6 +11,7 @@ from app.db.models import Base
 engine = create_async_engine(settings.database_url)
 
 
+# set the SQL settings
 @event.listens_for(engine.sync_engine, "connect")
 def _set_sqlite_pragmas(dbapi_connection, _connection_record) -> None:
     cursor = dbapi_connection.cursor()

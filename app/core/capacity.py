@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 
+# implementation of capacity limiter (as atomic operator)
 class CapacityLimiter:
     """Non-blocking concurrency cap.
 

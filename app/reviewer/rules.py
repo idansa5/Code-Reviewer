@@ -33,10 +33,13 @@ class Rule:
     rule_text: str
 
     def build_prompt(self, code: str) -> str:
-        return PROMPT_TEMPLATE.replace(RULE_PLACEHOLDER, self.rule_text).replace(CODE_PLACEHOLDER, code)
+        return PROMPT_TEMPLATE.replace(RULE_PLACEHOLDER, self.rule_text).replace(
+            CODE_PLACEHOLDER, code
+        )
 
 
 def load_rules(path: Path = RULES_FILE) -> list[Rule]:
+    """loading all rules from the rules yaml file"""
     with path.open() as f:
         data = yaml.safe_load(f)
 
@@ -49,11 +52,15 @@ def load_rules(path: Path = RULES_FILE) -> list[Rule]:
     for entry in entries:
         for field in ("id", "name", "rule"):
             if field not in entry:
-                raise ValueError(f"Rule entry missing required field {field!r}: {entry}")
+                raise ValueError(
+                    f"Rule entry missing required field {field!r}: {entry}"
+                )
         if entry["id"] in seen_ids:
             raise ValueError(f"Duplicate rule id: {entry['id']!r}")
         seen_ids.add(entry["id"])
-        rules.append(Rule(id=entry["id"], name=entry["name"], rule_text=entry["rule"].strip()))
+        rules.append(
+            Rule(id=entry["id"], name=entry["name"], rule_text=entry["rule"].strip())
+        )
 
     return rules
 
