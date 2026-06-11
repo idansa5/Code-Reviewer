@@ -14,11 +14,6 @@ from app.reviewer.rules import RULES
 logger = logging.getLogger(__name__)
 
 
-async def _run(fn, *args):
-    async with async_session_factory() as session:
-        return await fn(session, *args)
-
-
 async def run_scan(
     scan_id: str,
     code: str,
@@ -32,7 +27,10 @@ async def run_scan(
     slot released, even if an LLM call or response parse fails partway through.
     """
     try:
-        await _run(repo.mark_running, scan_id)
+        async with async_session_factory() as session:
+            await repo.mark_running(session, scan_id)
+        logger.info("Scan %s started", scan_id)
+
         # run each rule and check the code according to it
         for rule in RULES:
             prompt = rule.build_prompt(code)
@@ -46,17 +44,21 @@ async def run_scan(
                     f"LLM call for rule '{rule.id}' exceeded {settings.llm_timeout_seconds}s"
                 ) from None
             adheres = parse_verdict(raw)
-            await _run(
-                repo.save_rule_result, scan_id, rule.id, rule.name, adheres, None
-            )
+            logger.debug("Scan %s: rule %s -> %s", scan_id, rule.id, adheres)
+            async with async_session_factory() as session:
+                await repo.save_rule_result(
+                    session, scan_id, rule.id, rule.name, adheres, None
+                )
 
-        await _run(
-            repo.mark_completed, scan_id
-        )  # mark the scan as completed after going all of the rules
+        # mark the scan as completed after going all of the rules
+        async with async_session_factory() as session:
+            await repo.mark_completed(session, scan_id)
+        logger.info("Scan %s completed", scan_id)
     except Exception as exc:
         logger.exception("Scan %s failed", scan_id)
         try:
-            await _run(repo.mark_failed, scan_id, str(exc))
+            async with async_session_factory() as session:
+                await repo.mark_failed(session, scan_id, str(exc))
         except Exception:
             logger.exception("Scan %s: also failed to record failure status", scan_id)
     finally:

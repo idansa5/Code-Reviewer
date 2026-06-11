@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from fastapi import (
     APIRouter,
@@ -27,6 +28,8 @@ from app.schemas import (
     ScanResultResponse,
     ScanSubmitResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -94,6 +97,12 @@ async def submit_scan(
         await repo.fail_stale_scans(session)
         existing = await repo.find_reusable_scan(session, content_hash)
         if existing is not None:
+            logger.debug(
+                "Scan %s reused for content_hash %s (status=%s)",
+                existing.id,
+                content_hash,
+                existing.status,
+            )
             response.status_code = (
                 status.HTTP_200_OK
                 if existing.status == ScanStatus.COMPLETED.value
@@ -104,6 +113,11 @@ async def submit_scan(
             )
 
         if not limiter.try_acquire():  # at capacity (max_parallel_scans)
+            logger.warning(
+                "Scan submission rejected: at capacity (%d/%d)",
+                limiter.in_use,
+                settings.max_parallel_scans,
+            )
             raise HTTPException(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 f"Scan capacity reached ({settings.max_parallel_scans} concurrent scans). "
@@ -126,6 +140,7 @@ async def submit_scan(
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
+    logger.info("Scan %s submitted (file=%s)", scan.id, file.filename)
     response.status_code = status.HTTP_202_ACCEPTED
     return ScanSubmitResponse(scan_id=scan.id, status=scan.status, cached=False)
 

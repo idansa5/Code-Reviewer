@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import Protocol
 
 import ollama
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient(Protocol):
@@ -46,5 +49,6 @@ class OllamaClient:
         try:
             await self._client.list()
             return True
-        except Exception:
+        except Exception as exc:
+            logger.warning("Ollama health check failed: %s", exc)
             return False

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 RULES_FILE = Path(__file__).parent / "rules.yaml"
 
@@ -66,3 +69,4 @@ def load_rules(path: Path = RULES_FILE) -> list[Rule]:
 
 
 RULES: list[Rule] = load_rules()
+logger.info("Loaded %d rule(s) from %s", len(RULES), RULES_FILE)
