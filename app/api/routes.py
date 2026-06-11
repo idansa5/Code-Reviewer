@@ -116,9 +116,13 @@ async def submit_scan(
             limiter.release()  # in case the creation of the scan failed, release the slot
             raise
     # keep a reference to the background task to prevent early garbage collection
-    task = asyncio.create_task(
-        run_scan(scan.id, code, llm_client=client, release_slot=limiter.release)
-    )
+    try:
+        task = asyncio.create_task(
+            run_scan(scan.id, code, llm_client=client, release_slot=limiter.release)
+        )
+    except Exception:
+        limiter.release()
+        raise
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 

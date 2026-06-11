@@ -60,6 +60,8 @@ async def create_scan(
 
 async def mark_running(session: AsyncSession, scan_id: str) -> None:
     scan = await session.get(Scan, scan_id)
+    if scan is None:
+        return
     scan.status = ScanStatus.RUNNING.value
     await session.commit()
 
@@ -86,6 +88,8 @@ async def save_rule_result(
 
 async def mark_completed(session: AsyncSession, scan_id: str) -> None:
     scan = await session.get(Scan, scan_id)
+    if scan is None:
+        return
     scan.status = ScanStatus.COMPLETED.value
     scan.completed_at = utcnow()
     await session.commit()
@@ -93,6 +97,8 @@ async def mark_completed(session: AsyncSession, scan_id: str) -> None:
 
 async def mark_failed(session: AsyncSession, scan_id: str, error: str) -> None:
     scan = await session.get(Scan, scan_id)
+    if scan is None:
+        return
     scan.status = ScanStatus.FAILED.value
     scan.completed_at = utcnow()
     scan.error = error
@@ -109,11 +115,12 @@ async def get_scan(
     )
     result = await session.execute(stmt)
     scan = result.scalar_one_or_none()  # for strict max one row
-    # Lazy fixup: detect a worker that died mid-scan, otherwise the row would
-    # stay stuck in RUNNING forever.
+    # Lazy fixup: a worker that died mid-scan (or a process restart that lost
+    # an in-memory pending task) leaves the row stuck in pending/running
+    # forever otherwise.
     if (
         scan is not None
-        and scan.status == ScanStatus.RUNNING.value
+        and scan.status in (ScanStatus.PENDING.value, ScanStatus.RUNNING.value)
         and scan.created_at < _stale_cutoff()
     ):
         scan.status = ScanStatus.FAILED.value
@@ -123,12 +130,14 @@ async def get_scan(
     return scan
 
 
-# turn to failed  scans that got "hanged"
+# Fail pending/running scans stuck past the stale cutoff (worker died, or
+# their in-memory task was lost on a process restart).
 async def fail_stale_scans(session: AsyncSession) -> int:
     stmt = (
         update(Scan)
         .where(
-            Scan.status == ScanStatus.RUNNING.value, Scan.created_at < _stale_cutoff()
+            Scan.status.in_([ScanStatus.PENDING.value, ScanStatus.RUNNING.value]),
+            Scan.created_at < _stale_cutoff(),
         )
         .values(
             status=ScanStatus.FAILED.value,
