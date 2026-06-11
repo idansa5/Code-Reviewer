@@ -1,0 +1,119 @@
+from __future__ import annotations
+
+import asyncio
+
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.core.capacity import CapacityLimiter
+from app.core.hashing import compute_content_hash
+from app.db import repository as repo
+from app.db.models import ScanStatus
+from app.db.session import get_session
+from app.llm.client import LLMClient, OllamaClient
+from app.reviewer.scanner import run_scan
+from app.schemas import HealthResponse, RuleResultOut, ScanResultResponse, ScanSubmitResponse
+
+router = APIRouter()
+
+# Process-wide singletons. A single asyncio.Lock serializes the cache
+# lookup -> create-scan section (see app/db/models.py for the matching
+# defensive partial unique index).
+cache_lock = asyncio.Lock()
+capacity_limiter = CapacityLimiter(max_concurrent=settings.max_parallel_scans)
+llm_client: LLMClient = OllamaClient()
+_background_tasks: set[asyncio.Task] = set()
+
+
+def get_capacity_limiter() -> CapacityLimiter:
+    return capacity_limiter
+
+
+def get_llm_client() -> LLMClient:
+    return llm_client
+
+
+def get_cache_lock() -> asyncio.Lock:
+    return cache_lock
+
+
+@router.post("/scans", response_model=ScanSubmitResponse)
+async def submit_scan(
+    response: Response,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    limiter: CapacityLimiter = Depends(get_capacity_limiter),
+    client: LLMClient = Depends(get_llm_client),
+    lock: asyncio.Lock = Depends(get_cache_lock),
+) -> ScanSubmitResponse:
+    if not file.filename or not file.filename.lower().endswith(".py"):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Only .py files are accepted")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Uploaded file is empty")
+    if len(raw) > settings.max_file_size_bytes:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "File exceeds maximum size")
+
+    try:
+        code = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "File must be valid UTF-8 text")
+
+    if not code.strip():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Uploaded file is empty")
+
+    content_hash = compute_content_hash(code)
+
+    async with lock:
+        existing = await repo.find_reusable_scan(session, content_hash)
+        if existing is not None:
+            response.status_code = (
+                status.HTTP_200_OK
+                if existing.status == ScanStatus.COMPLETED.value
+                else status.HTTP_202_ACCEPTED
+            )
+            return ScanSubmitResponse(scan_id=existing.id, status=existing.status, cached=True)
+
+        if not limiter.try_acquire():
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                f"Scan capacity reached ({settings.max_parallel_scans} concurrent scans). "
+                "Please try again later.",
+            )
+
+        try:
+            scan = await repo.create_scan(session, content_hash, file.filename, code)
+        except Exception:
+            limiter.release()
+            raise
+
+    task = asyncio.create_task(run_scan(scan.id, code, llm_client=client, release_slot=limiter.release))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+    response.status_code = status.HTTP_202_ACCEPTED
+    return ScanSubmitResponse(scan_id=scan.id, status=scan.status, cached=False)
+
+
+@router.get("/scans/{scan_id}", response_model=ScanResultResponse)
+async def get_scan_result(scan_id: str, session: AsyncSession = Depends(get_session)) -> ScanResultResponse:
+    scan = await repo.get_scan(session, scan_id)
+    if scan is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Scan not found")
+
+    return ScanResultResponse(
+        scan_id=scan.id,
+        status=scan.status,
+        created_at=scan.created_at,
+        results=[
+            RuleResultOut(rule_id=r.rule_id, rule_name=r.rule_name, adheres=r.adheres)
+            for r in scan.results
+        ],
+    )
+
+
+@router.get("/health", response_model=HealthResponse)
+async def health(client: LLMClient = Depends(get_llm_client)) -> HealthResponse:
+    return HealthResponse(status="ok", ollama_reachable=await client.is_reachable())

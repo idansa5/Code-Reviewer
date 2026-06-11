@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     result_ttl_hours: int = 24
     database_url: str = "sqlite+aiosqlite:///./code_review.db"
     rules_version: str = "v1"
+    max_file_size_bytes: int = 1_000_000
 
 
 @lru_cache

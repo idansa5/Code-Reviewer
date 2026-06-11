@@ -11,6 +11,9 @@ class LLMClient(Protocol):
     async def complete(self, prompt: str, *, json_schema: dict | None = None) -> str:
         """Send a prompt to the model and return its raw text response."""
 
+    async def is_reachable(self) -> bool:
+        """Cheap connectivity check used by /health."""
+
 
 class OllamaClient:
     """Thin wrapper around ollama.AsyncClient; base_url and model are injected
@@ -37,3 +40,10 @@ class OllamaClient:
             options={"temperature": 0},  # deterministic verdicts -> consistent cache hits
         )
         return response.response
+
+    async def is_reachable(self) -> bool:
+        try:
+            await self._client.list()
+            return True
+        except Exception:
+            return False
