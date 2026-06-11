@@ -13,7 +13,7 @@ from app.db.session import async_session_factory, init_db
 
 
 async def _cleanup_loop() -> None:
-    """cleanup loop to inforce the 24 TTL"""
+    """Periodic backstop: enforces the 24-hour TTL and fails stale `running` scans."""
     while True:
         await asyncio.sleep(settings.cleanup_interval_seconds)
         async with async_session_factory() as session:

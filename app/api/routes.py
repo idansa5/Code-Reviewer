@@ -65,7 +65,7 @@ async def submit_scan(
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "Only .py files are accepted"
         )
-    # check if file is empty, in valid encoding and if excceds maximum size
+    # check the file is non-empty, valid UTF-8, and within the size limit
     raw = await file.read()
     if not raw:
         raise HTTPException(
@@ -103,7 +103,7 @@ async def submit_scan(
                 scan_id=existing.id, status=existing.status, cached=True
             )
 
-        if not limiter.try_acquire():  # more then 5 parralel scans
+        if not limiter.try_acquire():  # at capacity (max_parallel_scans)
             raise HTTPException(
                 status.HTTP_503_SERVICE_UNAVAILABLE,
                 f"Scan capacity reached ({settings.max_parallel_scans} concurrent scans). "
@@ -115,7 +115,7 @@ async def submit_scan(
         except Exception:
             limiter.release()  # in case the creation of the scan failed, release the slot
             raise
-    # add task refrence for background tasks in order to prevent early garbage collection
+    # keep a reference to the background task to prevent early garbage collection
     task = asyncio.create_task(
         run_scan(scan.id, code, llm_client=client, release_slot=limiter.release)
     )

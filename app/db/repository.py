@@ -108,9 +108,9 @@ async def get_scan(
         .options(selectinload(Scan.results))
     )
     result = await session.execute(stmt)
-    scan = result.scalar_one_or_none()  # for stict max one row
-    # Lazy fixup: check if the worker died mid-scan. Otherwise the row would stay
-
+    scan = result.scalar_one_or_none()  # for strict max one row
+    # Lazy fixup: detect a worker that died mid-scan, otherwise the row would
+    # stay stuck in RUNNING forever.
     if (
         scan is not None
         and scan.status == ScanStatus.RUNNING.value
