@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 
+from app.config import settings
 from app.db import repository as repo
 from app.db.session import async_session_factory
 from app.llm.client import LLMClient
@@ -34,13 +36,24 @@ async def run_scan(
 
         for rule in RULES:
             prompt = rule.build_prompt(code)
-            raw = await llm_client.complete(prompt, json_schema=VERDICT_SCHEMA)
+            try:
+                raw = await asyncio.wait_for(
+                    llm_client.complete(prompt, json_schema=VERDICT_SCHEMA),
+                    timeout=settings.llm_timeout_seconds,
+                )
+            except TimeoutError:
+                raise TimeoutError(
+                    f"LLM call for rule '{rule.id}' exceeded {settings.llm_timeout_seconds}s"
+                ) from None
             adheres = parse_verdict(raw)
             await _run(repo.save_rule_result, scan_id, rule.id, rule.name, adheres, None)
 
         await _run(repo.mark_completed, scan_id)
     except Exception as exc:
         logger.exception("Scan %s failed", scan_id)
-        await _run(repo.mark_failed, scan_id, str(exc))
+        try:
+            await _run(repo.mark_failed, scan_id, str(exc))
+        except Exception:
+            logger.exception("Scan %s: also failed to record failure status", scan_id)
     finally:
         release_slot()

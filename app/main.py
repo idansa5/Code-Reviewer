@@ -8,7 +8,7 @@ from fastapi import FastAPI
 
 from app.api.routes import router
 from app.config import settings
-from app.db.repository import delete_expired_scans
+from app.db.repository import delete_expired_scans, fail_stale_scans
 from app.db.session import async_session_factory, init_db
 
 
@@ -16,6 +16,7 @@ async def _cleanup_loop() -> None:
     while True:
         await asyncio.sleep(settings.cleanup_interval_seconds)
         async with async_session_factory() as session:
+            await fail_stale_scans(session)
             await delete_expired_scans(session)
 
 

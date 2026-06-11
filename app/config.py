@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     max_parallel_scans: int = 5
     result_ttl_hours: int = 24
     cleanup_interval_seconds: int = 600
+    scan_stale_seconds: int = 300
     database_url: str = "sqlite+aiosqlite:///./code_review.db"
     rules_version: str = "v1"
     max_file_size_bytes: int = 1_000_000

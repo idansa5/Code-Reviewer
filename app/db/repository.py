@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -15,6 +15,10 @@ REUSABLE_STATUSES = (ScanStatus.PENDING.value, ScanStatus.RUNNING.value, ScanSta
 def _cutoff(ttl_hours: int | None) -> dt.datetime:
     hours = settings.result_ttl_hours if ttl_hours is None else ttl_hours
     return utcnow() - dt.timedelta(hours=hours)
+
+
+def _stale_cutoff() -> dt.datetime:
+    return utcnow() - dt.timedelta(seconds=settings.scan_stale_seconds)
 
 
 async def find_reusable_scan(
@@ -84,7 +88,24 @@ async def get_scan(session: AsyncSession, scan_id: str, ttl_hours: int | None = 
         .options(selectinload(Scan.results))
     )
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    scan = result.scalar_one_or_none()
+    if scan is not None and scan.status == ScanStatus.RUNNING.value and scan.created_at < _stale_cutoff():
+        scan.status = ScanStatus.FAILED.value
+        scan.completed_at = utcnow()
+        scan.error = "Scan timed out"
+        await session.commit()
+    return scan
+
+
+async def fail_stale_scans(session: AsyncSession) -> int:
+    stmt = (
+        update(Scan)
+        .where(Scan.status == ScanStatus.RUNNING.value, Scan.created_at < _stale_cutoff())
+        .values(status=ScanStatus.FAILED.value, completed_at=utcnow(), error="Scan timed out")
+    )
+    result = await session.execute(stmt)
+    await session.commit()
+    return result.rowcount or 0
 
 
 async def delete_expired_scans(session: AsyncSession, ttl_hours: int | None = None) -> int:

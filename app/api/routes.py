@@ -48,25 +48,26 @@ async def submit_scan(
     lock: asyncio.Lock = Depends(get_cache_lock),
 ) -> ScanSubmitResponse:
     if not file.filename or not file.filename.lower().endswith(".py"):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Only .py files are accepted")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Only .py files are accepted")
 
     raw = await file.read()
     if not raw:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Uploaded file is empty")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Uploaded file is empty")
     if len(raw) > settings.max_file_size_bytes:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "File exceeds maximum size")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "File exceeds maximum size")
 
     try:
         code = raw.decode("utf-8")
     except UnicodeDecodeError:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "File must be valid UTF-8 text")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "File must be valid UTF-8 text")
 
     if not code.strip():
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Uploaded file is empty")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Uploaded file is empty")
 
     content_hash = compute_content_hash(code)
 
     async with lock:
+        await repo.fail_stale_scans(session)
         existing = await repo.find_reusable_scan(session, content_hash)
         if existing is not None:
             response.status_code = (

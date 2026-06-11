@@ -1,40 +1,18 @@
 rules:
   - id: meaningful_variable_names
     name: All variables have meaningful names
-    prompt_template: |
-      You are a strict code reviewer evaluating a single rule against the Python code below.
-
-      Rule: All variables (including function parameters, loop variables, and
+    rule: |
+      All variables (including function parameters, loop variables, and
       attributes) must have meaningful, descriptive names. Single-letter names,
       generic names like `x`, `tmp`, `data`, `val`, `foo`, or unclear abbreviations
       violate this rule. Short-lived loop counters such as `i`/`j` in simple loops,
       and conventional names like `self`/`cls`, are acceptable.
 
-      Code:
-      ```python
-      {{CODE}}
-      ```
-
-      Decide whether the code adheres to the rule.
-      Respond with adheres (boolean: true if the rule is followed, false if violated)
-      and reason (a short explanation).
-
   - id: docstring_matches_logic
     name: Docstring of function reflects the actual code's logic
-    prompt_template: |
-      You are a strict code reviewer evaluating a single rule against the Python code below.
-
-      Rule: For every function or method that has a docstring, the docstring must
+    rule: |
+      For every function or method that has a docstring, the docstring must
       accurately describe what the code actually does (parameters, return value,
       and behavior). A function with no docstring does not violate this rule -
       only an existing docstring that contradicts or misrepresents the
       implementation is a violation.
-
-      Code:
-      ```python
-      {{CODE}}
-      ```
-
-      Decide whether the code adheres to the rule.
-      Respond with adheres (boolean: true if the rule is followed, false if violated)
-      and reason (a short explanation).

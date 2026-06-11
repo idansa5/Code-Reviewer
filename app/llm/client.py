@@ -37,7 +37,7 @@ class OllamaClient:
             prompt=prompt,
             format=json_schema,
             stream=False,
-            options={"temperature": 0},  # deterministic verdicts -> consistent cache hits
+            options={"temperature": 0},  # keeps deterministic
         )
         return response.response
 
